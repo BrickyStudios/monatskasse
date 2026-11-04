@@ -4,7 +4,7 @@
   "private": true,
   "description": "Lokaler Monatsbudget-Tracker (225 €) mit Beleg-OCR und Excel-Export — läuft komplett offline auf dem Handy.",
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test test/*.test.mjs",
     "copy": "cap copy",
     "sync": "cap sync",
     "build:apk": "cd android && ./gradlew assembleDebug"
