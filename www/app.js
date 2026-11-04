@@ -1,7 +1,7 @@
 import { parseEuroToCents, formatEuro, formatCents } from "./money.js";
 import { parseReceiptItems, guessStore } from "./parse.js";
 
-const VERSION = "1.2.0";
+const VERSION = "1.2.1";
 const $ = (id) => document.getElementById(id);
 const Cap = window.Capacitor;
 const isNative = !!Cap?.isNativePlatform?.();
