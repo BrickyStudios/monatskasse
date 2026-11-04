@@ -1,0 +1,25 @@
+# deps
+node_modules/
+
+# Android build output
+android/build/
+android/app/build/
+android/.gradle/
+android/capacitor-cordova-android-plugins/
+android/local.properties
+android/app/release/
+*.apk
+*.aab
+
+# keystores / secrets — niemals committen
+*.keystore
+*.jks
+keystore.properties
+
+# OS / editor
+.DS_Store
+*.iml
+.idea/
+
+# Website-Build (tools/build_site.py)
+_site/
