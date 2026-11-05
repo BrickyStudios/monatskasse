@@ -2,7 +2,7 @@ import { parseEuroToCents, formatEuro, formatCents } from "./money.js";
 import { parseReceiptItems, guessStore } from "./parse.js";
 import { textIsSideways as isSideways } from "./orient.js";
 
-const VERSION = "1.2.1";
+const VERSION = "1.2.2";
 const $ = (id) => document.getElementById(id);
 const Cap = window.Capacitor;
 const isNative = !!Cap?.isNativePlatform?.();
