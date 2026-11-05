@@ -62,6 +62,23 @@ test("parser: Stoppwörter nur als ganze Wörter", () => {
   assert.deepEqual(items.map((i) => i.name), ["JOGHURT BECHER", "SPECK WÜRFEL", "BARILLA SPAGH", "POSTKARTE"]);
 });
 
+test("parser: Steuerklasse als Ziffer verlesen (echte OCR-Ausgabe)", () => {
+  const items = parseReceiptItems([
+    "CHIPS PAPRIKA 1,738",      // "1,73 B", Leerzeichen verschluckt, B -> 8
+    "KAFFEE GEMAHLEN 3,17 8",   // B -> 8
+    "PAPRIKA ROT 0,774",        // A -> 4
+    "MILCH 3,5% 1,099 A",
+    "COLA ZERO 1,5L 1-79 B",    // Komma als Bindestrich
+    "PFAND RUECKGABE -0,25",
+    "SUMME EUR 34,06",
+    "12.11.2026 14:32",
+    "Datum 2026-11-05",
+  ].join("\n"));
+  assert.deepEqual(items.map((i) => [i.name, i.cents]), [
+    ["CHIPS PAPRIKA", 173], ["KAFFEE GEMAHLEN", 317], ["PAPRIKA ROT", 77], ["MILCH 3,5%", 109], ["COLA ZERO 1,5L", 179],
+  ]);
+});
+
 test("guessStore: erste Wortzeile ohne Preis", () => {
   assert.equal(guessStore("\n  REWE   Markt GmbH \nMILCH 1,09\n"), "REWE Markt GmbH");
   assert.equal(guessStore("12.11.2026\nDM drogerie markt\nZahnpasta 1,45"), "DM drogerie markt");

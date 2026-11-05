@@ -1,5 +1,6 @@
 import { parseEuroToCents, formatEuro, formatCents } from "./money.js";
 import { parseReceiptItems, guessStore } from "./parse.js";
+import { textIsSideways as isSideways } from "./orient.js";
 
 const VERSION = "1.2.1";
 const $ = (id) => document.getElementById(id);
@@ -621,6 +622,7 @@ function updateChips() {
 }
 
 // Bild verkleinern: spart Speicher und macht OCR schneller/robuster.
+// Liegt der Bon quer im Foto (Handy flach über dem Tisch, Lagesensor rät falsch), gleich geraderücken.
 function downscale(file, max = 1600, quality = 0.82) {
   return new Promise((res) => {
     const img = new Image();
@@ -631,11 +633,34 @@ function downscale(file, max = 1600, quality = 0.82) {
       c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
       c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);
-      res(c.toDataURL("image/jpeg", quality));
+      res(rotated(c, textIsSideways(c) ? 90 : 0).toDataURL("image/jpeg", quality));
     };
     img.onerror = () => { URL.revokeObjectURL(url); res(null); };
     img.src = url;
   });
+}
+
+// Bild oder Canvas um 0/90/180/270° im Uhrzeigersinn drehen.
+function rotated(src, deg) {
+  if (!deg) return src;
+  const q = deg % 180, c = el("canvas");
+  c.width = q ? src.height : src.width; c.height = q ? src.width : src.height;
+  const x = c.getContext("2d");
+  x.translate(c.width / 2, c.height / 2); x.rotate((deg * Math.PI) / 180);
+  x.drawImage(src, -src.width / 2, -src.height / 2);
+  return c;
+}
+
+function textIsSideways(src) {
+  const s = Math.min(1, 400 / Math.max(src.width, src.height));
+  const w = Math.round(src.width * s), h = Math.round(src.height * s);
+  const c = el("canvas"); c.width = w; c.height = h;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(src, 0, 0, w, h);
+  return isSideways(x.getImageData(0, 0, w, h).data, w, h);
+}
+function loadImg(src) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 }
 
 function nudge(node) {
@@ -725,30 +750,47 @@ async function runOcr() {
   sheetOcr.open();
   pushLayer("ocr", () => closeOcr(0));
   syncLock();
+  const src = photo.data;
+  let worker = null;
   try {
     await loadTesseract();
     // Absolute Pfade (relativ bricht im Worker); gzip:false, weil AGP die .gz-Sprachdatei beim
     // Bauen entpackt; cacheMethod none, sonst legt Tesseract 15 MB doppelt in IndexedDB ab.
     const base = location.origin + "/vendor/tess";
-    const { data } = await window.Tesseract.recognize(photo.data, "deu", {
+    let label = "Lese Bon";
+    worker = await window.Tesseract.createWorker("deu", 1, {
       workerPath: base + "/worker.min.js", corePath: base + "/", langPath: base + "/",
       gzip: false, cacheMethod: "none",
       logger: (m) => {
         if (job !== ocrJob) return;
         if (m.status === "recognizing text") {
           setProgress(0.12 + m.progress * 0.88);
-          $("ocr-status").textContent = `Lese Bon … ${Math.round(m.progress * 100)} %`;
+          $("ocr-status").textContent = `${label} … ${Math.round(m.progress * 100)} %`;
         }
       },
     });
-    if (job !== ocrJob) return;
-    lastOcr = { items: parseReceiptItems(data.text), store: guessStore(data.text) };
+    // Ein Textblock: im Standardmodus liest Tesseract Namen- und Preisspalte getrennt, dann fehlen alle Preise.
+    await worker.setParameters({ tessedit_pageseg_mode: "6" });
+    // Falsch herum gelesen sinkt die Konfidenz auf ~35–40 (gerade ~90): dann gedreht nochmal versuchen.
+    const img = await loadImg(src);
+    let best = null;
+    for (const deg of [0, 180, 90, 270]) {
+      const { data } = await worker.recognize(rotated(img, deg));
+      if (job !== ocrJob) return;
+      if (!best || data.confidence > best.confidence) best = { ...data, deg };
+      if (best.confidence >= 60) break;
+      label = "Foto steht schief, lese gedreht";
+    }
+    if (best.deg && photo.data === src) { photo.data = rotated(img, best.deg).toDataURL("image/jpeg", 0.82); renderPhoto(); }
+    lastOcr = { items: parseReceiptItems(best.text), store: guessStore(best.text) };
     showOcrItems();
   } catch (err) {
     if (job !== ocrJob) return;
     console.error(err);
     $("ocr-progress").classList.add("hidden");
     $("ocr-status").textContent = "Texterkennung hat nicht geklappt. Trag die Ausgabe einfach von Hand ein.";
+  } finally {
+    worker?.terminate(); // gibt ~40 MB Sprachdaten + WASM frei
   }
 }
 function closeOcr(v = 0) {

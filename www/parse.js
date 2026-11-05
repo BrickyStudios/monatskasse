@@ -18,7 +18,9 @@ const STOP_RE = new RegExp(
 );
 
 // Preis am Zeilenende: 1,99 | 12,50 | 1.234,56 ; optional nachgestellte Steuerklasse (A/B) und Zeichen.
-const PRICE_END = /(-?\d{1,3}(?:[.\s]\d{3})*[.,]\d{2})\s*(?:[*%]|[a-dA-D]|eur|€)?\s*$/;
+// OCR liest die Steuerklasse oft als Ziffer (B -> 8, A -> 4) und klebt sie an: "1,738", "3,17 8";
+// das kleine Komma auf Thermopapier kommt manchmal als Bindestrich an: "1-79".
+const PRICE_END = /(-?\d{1,3}(?:[.\s]\d{3})*[.,-]\d{2})\d?\s*(?:[*%]|[a-dA-D\d]|eur|€)?\s*$/;
 
 function isStopword(name) {
   return STOP_RE.test(name);
@@ -49,7 +51,7 @@ export function parseReceiptItems(rawText) {
     if (trimmed.length < 3) continue;
     const m = trimmed.match(PRICE_END);
     if (!m) continue;
-    const cents = parseEuroToCents(m[1]);
+    const cents = parseEuroToCents(m[1].replace(/(\d)-(?=\d{2}$)/, "$1,"));
     if (cents == null || cents <= 0) continue;
     let name = trimmed.slice(0, m.index).trim();
     // Mengen-Präfixe wie "2 x" oder "1x" am Anfang wegräumen.
