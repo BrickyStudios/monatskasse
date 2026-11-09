@@ -1,6 +1,6 @@
 // Offline cache for the Monatskasse web app. Not used inside the Android app (Capacitor serves the files itself).
 const VERSION = "mk-1";
-const SHELL = ["./", "styles.css", "app.js", "money.js", "parse.js", "orient.js", "vendor/xlsx.full.min.js", "manifest.webmanifest", "icons/icon-192.png"];
+const SHELL = ["./", "styles.css", "app.js", "money.js", "parse.js", "orient.js", "binarize.js", "vendor/xlsx.full.min.js", "manifest.webmanifest", "icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

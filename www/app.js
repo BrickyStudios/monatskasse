@@ -1,6 +1,7 @@
 import { parseEuroToCents, formatEuro, formatCents } from "./money.js";
 import { parseReceiptItems, guessStore } from "./parse.js";
 import { textIsSideways as isSideways } from "./orient.js";
+import { binarize } from "./binarize.js";
 
 const VERSION = "1.2.2";
 const $ = (id) => document.getElementById(id);
@@ -659,6 +660,14 @@ function textIsSideways(src) {
   x.drawImage(src, 0, 0, w, h);
   return isSideways(x.getImageData(0, 0, w, h).data, w, h);
 }
+// Typische Wort-Höhe in px (Median), daraus Vergrößerung und Fenster für den zweiten Durchgang.
+function wordHeight(data) {
+  const hs = [];
+  for (const b of data.blocks || []) for (const p of b.paragraphs) for (const l of p.lines) for (const wd of l.words)
+    if (wd.confidence > 50 && wd.text.length > 1) hs.push(wd.bbox.y1 - wd.bbox.y0);
+  hs.sort((a, b) => a - b);
+  return hs.length >= 5 ? hs[hs.length >> 1] : 0;
+}
 function loadImg(src) {
   return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 }
@@ -771,18 +780,36 @@ async function runOcr() {
     });
     // Ein Textblock: im Standardmodus liest Tesseract Namen- und Preisspalte getrennt, dann fehlen alle Preise.
     await worker.setParameters({ tessedit_pageseg_mode: "6" });
-    // Falsch herum gelesen sinkt die Konfidenz auf ~35–40 (gerade ~90): dann gedreht nochmal versuchen.
+    // Falsch herum gelesen liegt die Konfidenz bei 15–35, gerade bei 40–85 (echte Bon-Fotos): dann gedreht nochmal.
     const img = await loadImg(src);
     let best = null;
     for (const deg of [0, 180, 90, 270]) {
-      const { data } = await worker.recognize(rotated(img, deg));
+      const { data } = await worker.recognize(rotated(img, deg), {}, { blocks: true });
       if (job !== ocrJob) return;
       if (!best || data.confidence > best.confidence) best = { ...data, deg };
-      if (best.confidence >= 60) break;
+      if (best.confidence >= 40) break;
       label = "Foto steht schief, lese gedreht";
     }
     if (best.deg && photo.data === src) { photo.data = rotated(img, best.deg).toDataURL("image/jpeg", 0.82); renderPhoto(); }
-    lastOcr = { items: parseReceiptItems(best.text), store: guessStore(best.text) };
+    // Zweiter Durchgang, doppelt so groß und schwarz/weiß mit lokaler Schwelle: rettet Schatten, blasses
+    // Thermopapier und kleine Kommas. Bei sauberen Scans liest der erste besser. Es gewinnt, wer mehr Posten findet.
+    label = "Lese genauer";
+    const h = wordHeight(best) || 15, straight = rotated(img, best.deg);
+    const s = Math.min(2.5, Math.max(2, 30 / h), Math.sqrt(1e7 / (straight.width * straight.height)));
+    const c = el("canvas"); c.width = Math.round(straight.width * s); c.height = Math.round(straight.height * s);
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.drawImage(straight, 0, 0, c.width, c.height);
+    const px = x.getImageData(0, 0, c.width, c.height);
+    binarize(px.data, c.width, c.height, Math.round(2 * h * s));
+    x.putImageData(px, 0, 0);
+    const { data: fine } = await worker.recognize(c);
+    if (job !== ocrJob) return;
+    let text = best.text, items = parseReceiptItems(text);
+    const fineItems = parseReceiptItems(fine.text);
+    if (fineItems.length > items.length || (fineItems.length === items.length && fine.confidence > best.confidence)) {
+      text = fine.text; items = fineItems;
+    }
+    lastOcr = { items, store: guessStore(text) };
     showOcrItems();
   } catch (err) {
     if (job !== ocrJob) return;

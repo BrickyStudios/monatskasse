@@ -79,6 +79,47 @@ test("parser: Steuerklasse als Ziffer verlesen (echte OCR-Ausgabe)", () => {
   ]);
 });
 
+test("parser: Zeilen aus echten Bon-Fotos (Wikimedia Commons + dm)", () => {
+  const items = parseReceiptItems([
+    "Subbelratherstraße 387-407",           // Hausnummer, kein Preis
+    "Nø tan today Sunless Self Tan 12,95 1", // dm: Menge hinten
+    "4015400835974 PAMPERS PP GR2 MIDI €7,85 A", // Rossmann: EAN vorn, € vor dem Preis
+    "*Diesel SB A 76,64 EUR*",               // Tankstelle
+    "0,720 KG x 11,49",                      // Gewicht x Kilopreis, Posten folgt darunter
+    "RI GULASCH A.D.KEU 8,27 E",
+    "2xLatte Macchiato à 4.50 CHF 9.00",
+    "1=19,00% 12,95 10,88 2,07",             // MwSt-Tabelle
+    "A 7% 0,53 7,51 8,04",
+    "E 7,0% 0,82 11,68 12,50",
+    "E 1319,00 12,95 1068 2,07",             // dieselbe Zeile, % verschluckt (echte OCR vom dm-Bon)
+    "BARGELD 50,00",
+    "ZURÜCK 24,26",
+    "Maestro Chip €7,85",
+    "haben Sie einen Rabatt in Höhe von 2,53",
+  ].join("\n"));
+  assert.deepEqual(items.map((i) => [i.name, i.cents]), [
+    ["Nø tan today Sunless Self Tan", 1295], ["PAMPERS PP GR2 MIDI", 785], ["Diesel SB A", 7664],
+    ["RI GULASCH A.D.KEU", 827], ["Latte Macchiato à 4.50 CHF", 900],
+  ]);
+});
+
+test("parser: nach der Endsumme ist Schluss, Zwischensumme zählt nicht", () => {
+  const items = parseReceiptItems([
+    "GESCHIRRSPÜLTABS 2,85 D",
+    "ZWI.SUMME 2,85",
+    "0,682 KG.x 2,49",
+    "KARTOFFELN LOSE 1,70 E",
+    "1=19,00% 12 950788 2,07",   // echte OCR der dm-MwSt-Zeile
+    "CREME FRAICHE 30% 0,99 E",
+    "SUMME EUR 5,54",
+    "02021 2956 79,73",          // Telefonnummer in der Fußzeile
+    "13(3&006 1145 ) 14:12 04 5,20",
+  ].join("\n"));
+  assert.deepEqual(items.map((i) => [i.name, i.cents]), [
+    ["GESCHIRRSPÜLTABS", 285], ["KARTOFFELN LOSE", 170], ["CREME FRAICHE 30%", 99],
+  ]);
+});
+
 test("guessStore: erste Wortzeile ohne Preis", () => {
   assert.equal(guessStore("\n  REWE   Markt GmbH \nMILCH 1,09\n"), "REWE Markt GmbH");
   assert.equal(guessStore("12.11.2026\nDM drogerie markt\nZahnpasta 1,45"), "DM drogerie markt");

@@ -10,6 +10,7 @@ const STOPWORDS = [
   "datum", "uhrzeit", "terminal", "trace", "pos", "steuernr", "ust-id",
   "betrag", "gesamtbetrag", "endbetrag", "zahlbetrag", "posten",
   "kreditkarte", "debitkarte", "bankkarte",
+  "bargeld", "zurück", "zurueck", "maestro", "vpay", "v pay", "amex", "contactless", "rabatt",
 ];
 // Nur ganze Wörter: sonst fliegen "Becher" (ec), "Speck" (ec), "Barilla" (bar) raus.
 const STOP_RE = new RegExp(
@@ -17,10 +18,11 @@ const STOP_RE = new RegExp(
   "iu",
 );
 
-// Preis am Zeilenende: 1,99 | 12,50 | 1.234,56 ; optional nachgestellte Steuerklasse (A/B) und Zeichen.
+// Preis am Zeilenende: 1,99 | 12,50 | 1.234,56 ; danach bis zu zwei Anhängsel: Steuerklasse (A/B/E/V),
+// Menge ("12,95 1" bei dm), EUR, *, €: "76,64 EUR*".
 // OCR liest die Steuerklasse oft als Ziffer (B -> 8, A -> 4) und klebt sie an: "1,738", "3,17 8";
-// das kleine Komma auf Thermopapier kommt manchmal als Bindestrich an: "1-79".
-const PRICE_END = /(-?\d{1,3}(?:[.\s]\d{3})*[.,-]\d{2})\d?\s*(?:[*%]|[a-dA-D\d]|eur|€)?\s*$/;
+// das kleine Komma auf Thermopapier kommt manchmal als Bindestrich an: "1-79" (aber nicht "387-407").
+const PRICE_END = /(-?\d{1,3}(?:[.\s]\d{3})*(?:[.,]\d{2}|-\d{2}(?!\d)))\d?(?:\s*(?:[*%€]|eur|[a-z\d])(?![a-z])){0,2}\s*$/i;
 
 function isStopword(name) {
   return STOP_RE.test(name);
@@ -54,12 +56,23 @@ export function parseReceiptItems(rawText) {
     const cents = parseEuroToCents(m[1].replace(/(\d)-(?=\d{2}$)/, "$1,"));
     if (cents == null || cents <= 0) continue;
     let name = trimmed.slice(0, m.index).trim();
+    // MwSt-Tabelle: "A 7% 0,53 7,51 8,04", "1=19,00% 12 950788 2,07", ohne %: "1319,00 12,95 10,88 2,07".
+    // Fettgehalt ("MILCH 3,5%", "CREME FRAICHE 30%") bleibt.
+    if (/%.*\d[.,]\d{2}/.test(name) || /(^|[^\d.,])(5|7|16|19)([.,]0+)?\s*%/.test(name)) continue;
+    if ((name.match(/\d[.,]\d{2}(?!\d)/g) || []).length >= 2) continue;
+    if (/(^|[^\p{L}])[xX*]$/u.test(name)) continue; // "0,720 KG x 11,49", "0,682 KG.x": Kilopreis, Posten steht darunter
+    name = name.replace(/^[^\p{L}\d]+/u, "");      // OCR-Krümel vorn: "* ", "| ", "; "
+    name = name.replace(/^\d{7,}\s+/, "");          // EAN/Artikelnummer vorn
     // Mengen-Präfixe wie "2 x" oder "1x" am Anfang wegräumen.
     name = name.replace(/^\d+\s*[xX*]\s*/, "").trim();
-    name = name.replace(/[.\-–·:]+$/, "").trim();
+    name = name.replace(/[.\-–·:€*\s]+$/, "").trim();
     if (name.length < 2) continue;      // reine Zahlenzeile / Rest
     if (/^\d+$/.test(name)) continue;
-    if (isStopword(name)) continue;
+    if (isStopword(name)) {
+      // Nach der Endsumme kommen nur Zahlung, Steuer und Fußzeile (Telefon, Kassen-Nr.): hier ist Schluss.
+      if (/summe|zahlen|total|gesamt/i.test(name) && !/zw|sub|netto|mwst/i.test(name)) break;
+      continue;
+    }
     out.push({ name, cents });
   }
   return out;
