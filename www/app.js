@@ -3,7 +3,7 @@ import { parseReceipt, parseReceiptItems, betterRead, readFits, guessStore } fro
 import { textIsSideways as isSideways } from "./orient.js";
 import { binarize } from "./binarize.js";
 
-const VERSION = "1.2.3";
+const VERSION = "1.2.4";
 const $ = (id) => document.getElementById(id);
 const Cap = window.Capacitor;
 const isNative = !!Cap?.isNativePlatform?.();
