@@ -15,3 +15,7 @@ test("binarize: Schrift bleibt schwarz, Schatten wird weiß", () => {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
     assert.equal(px[(y * w + x) * 4], ink(x, y) ? 0 : 255, `Pixel ${x},${y}`);
 });
+
+test("binarize: zu große Bilder werden abgelehnt statt still falsch (Uint32-Summe)", () => {
+  assert.throws(() => binarize(new Uint8ClampedArray(0), 4200, 4011, 15), RangeError);
+});

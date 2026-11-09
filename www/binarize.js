@@ -1,9 +1,11 @@
 /**
  * Schwarz/weiß mit lokaler Schwelle (Mittelwert im Fenster win×win, Pixel um c dunkler = Schrift).
- * Tesseracts globale Schwelle kippt bei Handschatten und blassem Thermopapier; dann fehlt v. a. das
- * kleine Komma ("12595" statt "12,95"). rgba = ImageData.data, wird überschrieben.
+ * Tesseracts Standard-Schwelle (Otsu, global) kippt bei Handschatten und blassem Thermopapier; dann fehlt
+ * v. a. das kleine Komma ("12595" statt "12,95"). Das eingebaute Sauvola (thresholding_method 2) las die
+ * Testbons schlechter. rgba = ImageData.data, wird überschrieben. Höchstens 16,8 Mio. Pixel (Uint32-Summe).
  */
 export function binarize(rgba, w, h, win, c = 20) {
+  if (w * h > 16843009) throw new RangeError("binarize: Bild zu groß");
   const W = w + 1, sum = new Uint32Array(W * (h + 1)), g = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     let row = 0;

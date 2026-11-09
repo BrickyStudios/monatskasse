@@ -1,5 +1,5 @@
 import { parseEuroToCents, formatEuro, formatCents } from "./money.js";
-import { parseReceiptItems, guessStore } from "./parse.js";
+import { parseReceipt, parseReceiptItems, betterRead, readFits, guessStore } from "./parse.js";
 import { textIsSideways as isSideways } from "./orient.js";
 import { binarize } from "./binarize.js";
 
@@ -668,6 +668,24 @@ function wordHeight(data) {
   hs.sort((a, b) => a - b);
   return hs.length >= 5 ? hs[hs.length >> 1] : 0;
 }
+// Zweiter OCR-Durchgang: doppelt so groß und schwarz/weiß mit lokaler Schwelle (rettet Schatten, blasses
+// Thermopapier, kleine Kommas). Eigene Funktion, damit die ~40 MB Pixeldaten vor recognize() frei werden.
+function fineCanvas(src, h) {
+  const s = Math.min(2.5, Math.max(2, 30 / h), Math.sqrt(1e7 / (src.width * src.height)));
+  const c = el("canvas"); c.width = Math.round(src.width * s); c.height = Math.round(src.height * s);
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(src, 0, 0, c.width, c.height);
+  const px = x.getImageData(0, 0, c.width, c.height);
+  binarize(px.data, c.width, c.height, Math.round(2 * h * s));
+  x.putImageData(px, 0, 0);
+  return c;
+}
+// Canvas selbst in ein Blob wandeln: tesseract.js 5 ruft sonst toBlob() und hängt für immer, wenn dafür
+// der Speicher fehlt (blob = null). Bilder gehen unverändert durch.
+function canvasBlob(c) {
+  if (!(c instanceof HTMLCanvasElement)) return c;
+  return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("Canvas zu groß für toBlob")))));
+}
 function loadImg(src) {
   return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 }
@@ -735,6 +753,7 @@ function deleteEditing() {
 
 // ---------- OCR-Sheet ----------
 let ocrJob = 0;
+let ocrWorker = null; // laufender Tesseract-Worker: Schließen des Sheets beendet ihn sofort
 let lastOcr = { items: [], store: "" };
 let tessLoading = null;
 function loadTesseract() {
@@ -765,7 +784,7 @@ async function runOcr() {
     await loadTesseract();
     // Absolute Pfade (relativ bricht im Worker); gzip:false, weil AGP die .gz-Sprachdatei beim
     // Bauen entpackt; cacheMethod none, sonst legt Tesseract 15 MB doppelt in IndexedDB ab.
-    const base = location.origin + "/vendor/tess";
+    const base = new URL("vendor/tess", location.href).href; // Web-App liegt unter /monatskasse/app/
     let label = "Lese Bon";
     worker = await window.Tesseract.createWorker("deu", 1, {
       workerPath: base + "/worker.min.js", corePath: base + "/", langPath: base + "/",
@@ -778,38 +797,37 @@ async function runOcr() {
         }
       },
     });
+    if (job !== ocrJob) return;
+    ocrWorker = worker; // erst jetzt: ein abgebrochener Job darf den Worker eines neuen nicht überschreiben
     // Ein Textblock: im Standardmodus liest Tesseract Namen- und Preisspalte getrennt, dann fehlen alle Preise.
     await worker.setParameters({ tessedit_pageseg_mode: "6" });
-    // Falsch herum gelesen liegt die Konfidenz bei 15–35, gerade bei 40–85 (echte Bon-Fotos): dann gedreht nochmal.
+    // Falsch herum gelesen liegt die Konfidenz bei 15–35, gerade bei 40–85 (echte Bon-Fotos): dann gedreht
+    // nochmal. Zwischen 40 und 60 ohne Posten nur noch kopfüber probieren (quer dreht schon downscale()).
     const img = await loadImg(src);
     let best = null;
     for (const deg of [0, 180, 90, 270]) {
-      const { data } = await worker.recognize(rotated(img, deg), {}, { blocks: true });
+      const { data } = await worker.recognize(await canvasBlob(rotated(img, deg)), {}, { blocks: true, hocr: false, tsv: false });
       if (job !== ocrJob) return;
       if (!best || data.confidence > best.confidence) best = { ...data, deg };
-      if (best.confidence >= 40) break;
+      if (best.confidence >= 60 || (best.confidence >= 40 && (deg === 180 || parseReceiptItems(best.text).length))) break;
       label = "Foto steht schief, lese gedreht";
     }
     if (best.deg && photo.data === src) { photo.data = rotated(img, best.deg).toDataURL("image/jpeg", 0.82); renderPhoto(); }
-    // Zweiter Durchgang, doppelt so groß und schwarz/weiß mit lokaler Schwelle: rettet Schatten, blasses
-    // Thermopapier und kleine Kommas. Bei sauberen Scans liest der erste besser. Es gewinnt, wer mehr Posten findet.
-    label = "Lese genauer";
-    const h = wordHeight(best) || 15, straight = rotated(img, best.deg);
-    const s = Math.min(2.5, Math.max(2, 30 / h), Math.sqrt(1e7 / (straight.width * straight.height)));
-    const c = el("canvas"); c.width = Math.round(straight.width * s); c.height = Math.round(straight.height * s);
-    const x = c.getContext("2d", { willReadFrequently: true });
-    x.drawImage(straight, 0, 0, c.width, c.height);
-    const px = x.getImageData(0, 0, c.width, c.height);
-    binarize(px.data, c.width, c.height, Math.round(2 * h * s));
-    x.putImageData(px, 0, 0);
-    const { data: fine } = await worker.recognize(c);
-    if (job !== ocrJob) return;
-    let text = best.text, items = parseReceiptItems(text);
-    const fineItems = parseReceiptItems(fine.text);
-    if (fineItems.length > items.length || (fineItems.length === items.length && fine.confidence > best.confidence)) {
-      text = fine.text; items = fineItems;
+    let read = { ...parseReceipt(best.text), text: best.text, confidence: best.confidence };
+    // Zweiter Durchgang (siehe fineCanvas), nur wenn die Posten noch nicht die Bon-Summe ergeben. Bei sauberen
+    // Scans liest der erste besser, betterRead wählt. Scheitert er (Speicher), bleibt das Ergebnis des ersten.
+    if (!readFits(read)) try {
+      label = "Lese genauer";
+      const c = fineCanvas(rotated(img, best.deg), wordHeight(best) || 15), blob = await canvasBlob(c);
+      c.width = c.height = 0; // ~40 MB Canvas-Speicher sofort frei, Tesseract hat das PNG
+      const { data: fine } = await worker.recognize(blob, {}, { blocks: false, hocr: false, tsv: false });
+      if (job !== ocrJob) return;
+      read = betterRead(read, { ...parseReceipt(fine.text), text: fine.text, confidence: fine.confidence });
+    } catch (err) {
+      if (job !== ocrJob) return;
+      console.error(err);
     }
-    lastOcr = { items, store: guessStore(text) };
+    lastOcr = { items: read.items, store: guessStore(read.text), total: read.total, adjust: read.adjust };
     showOcrItems();
   } catch (err) {
     if (job !== ocrJob) return;
@@ -817,11 +835,13 @@ async function runOcr() {
     $("ocr-progress").classList.add("hidden");
     $("ocr-status").textContent = "Texterkennung hat nicht geklappt. Trag die Ausgabe einfach von Hand ein.";
   } finally {
-    worker?.terminate(); // gibt ~40 MB Sprachdaten + WASM frei
+    worker?.terminate(); // gibt ~40 MB Sprachdaten + WASM frei; doppelt beenden ist in tesseract.js 5 harmlos
+    if (ocrWorker === worker) ocrWorker = null;
   }
 }
 function closeOcr(v = 0) {
   ocrJob++; // laufende Erkennung verwerfen
+  ocrWorker?.terminate(); ocrWorker = null;
   dropLayer("ocr");
   sheetOcr.close(v);
   syncLock();
@@ -838,7 +858,7 @@ function showOcrItems() {
   ul.replaceChildren();
   for (const it of items) {
     const li = el("li", "row ocr-row");
-    const cb = el("input", "check"); cb.type = "checkbox"; cb.checked = true; cb.setAttribute("aria-label", "Übernehmen");
+    const cb = el("input", "check"); cb.type = "checkbox"; cb.checked = !it.unsure; cb.setAttribute("aria-label", "Übernehmen"); // unsure: evtl. verlesene Summe
     const name = el("input", "oi-name"); name.type = "text"; name.value = it.name; name.setAttribute("aria-label", "Name");
     const price = el("input", "oi-price"); price.type = "text"; price.inputMode = "decimal"; price.value = formatCents(it.cents); price.setAttribute("aria-label", "Preis");
     for (const n of [cb, name, price]) n.addEventListener("input", updateOcrTotal);
@@ -856,7 +876,8 @@ function selectedOcr() {
 }
 function updateOcrTotal() {
   const sel = selectedOcr(), sum = sel.reduce((s, x) => s + x.cents, 0);
-  $("ocr-total").replaceChildren(el("span", null, `${sel.length} ausgewählt`), el("b", null, formatEuro(sum)));
+  const bon = lastOcr.total != null ? ` · Bon ${formatEuro(lastOcr.total)}` : ""; // zum Vergleichen
+  $("ocr-total").replaceChildren(el("span", null, `${sel.length} ausgewählt${bon}`), el("b", null, formatEuro(sum)));
   $("ocr-add").disabled = !sel.length;
   $("ocr-add").textContent = sel.length ? `Hinzufügen (${sel.length})` : "Hinzufügen";
   $("ocr-single").disabled = !sel.length;
@@ -881,7 +902,9 @@ async function addOcrItems() {
 function takeOcrAsOne() {
   const sel = selectedOcr();
   if (!sel.length) return;
-  $("exp-amount").value = formatCents(sel.reduce((s, x) => s + x.cents, 0));
+  // Alles angehakt: Rabatt und Pfand-Rückgabe vom Bon abziehen, sonst bucht man mehr, als bezahlt wurde.
+  const all = sel.length >= lastOcr.items.filter((i) => !i.unsure).length;
+  $("exp-amount").value = formatCents(Math.max(0, sel.reduce((s, x) => s + x.cents, 0) + (all ? lastOcr.adjust || 0 : 0)));
   if (!$("exp-text").value.trim()) $("exp-text").value = lastOcr.store || "Einkauf";
   sizeAmount(); validate();
   haptic("light");
