@@ -35,7 +35,10 @@ Nachweis.
   Abbruch nichts zerstört.
 
 ## Design (nach Apples Prinzipien)
-- **Systemschrift**, größenabhängiges Tracking: große Zahl −0,04 em, Text ~0.
+- **Systemschrift**, größenabhängiges Tracking: große Zahl −0,03 em, Text 0. Gewichte 400/500,
+  600 nur für Titel und die große Zahl (seit 1.3.0, unslop-Durchgang).
+- **Raster und Farbe:** Abstände in 4-px-Schritten, ein Akzent (auch für den Budget-Balken),
+  Schatten neutral, ein Easing `cubic-bezier(0.22, 1, 0.36, 1)`.
 - **Gruppierte Listen** im iOS-Stil, eingerückte Trennlinien, Ausgaben nach Tagen.
 - **Durchscheinende Leisten** (blur + saturate); Trennlinie oben erst beim Scrollen.
 - **Sheets:** Federphysik (Dämpfung/Response statt Dauer), 1:1 am Griff ziehen,

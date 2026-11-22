@@ -36,7 +36,7 @@ await p.setInputFiles("#exp-photo", receipt); await p.waitForTimeout(800);
 await p.locator("#exp-amount").blur(); await p.waitForTimeout(300);
 await shot(p, "3-ausgabe");
 await p.tap("#ocr-btn");
-await p.waitForSelector("#sheet-ocr.is-open, #sheet-ocr.open", { timeout: 90_000 }).catch(() => {});
+await p.waitForSelector("#ocr-box:not(.hidden)", { timeout: 90_000 }).catch(() => {}); // OCR fertig, nicht nur Sheet offen
 await p.waitForTimeout(1500);
 await shot(p, "4-kassenbon");
 

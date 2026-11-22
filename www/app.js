@@ -391,8 +391,8 @@ function renderOverview(dir = 0) {
 
   if (dir && !reduceMotion.matches) {
     for (const n of document.querySelectorAll("#view-overview .hero, #cat-section, #days, #empty")) {
-      n.animate([{ opacity: 0, transform: `translateX(${dir * 18}px)` }, { opacity: 1, transform: "none" }],
-        { duration: 280, easing: "cubic-bezier(.22,1,.36,1)" });
+      n.animate([{ opacity: 0, transform: `translateX(${dir * 12}px)` }, { opacity: 1, transform: "none" }],
+        { duration: 320, easing: "cubic-bezier(.22,1,.36,1)" });
     }
   }
 }
@@ -437,12 +437,12 @@ function renderDays(list, { isCur, isPast, allowance }) {
   const welcome = firstRun && isCur && !list.length;
   $("welcome").classList.toggle("hidden", !welcome);
   if (welcome) {
-    $("empty-title").textContent = "Willkommen";
+    $("empty-title").textContent = "Dein Monatsbudget";
     $("empty-text").textContent = "Wie viel Geld hast du im Monat? Jede Ausgabe zieht davon ab.";
   } else if (!list.length) {
     $("empty-title").textContent = isCur ? "Noch nichts ausgegeben" : isPast ? "Keine Ausgaben" : "Noch nicht begonnen";
     $("empty-text").textContent = isCur ? `${formatEuro(allowance)} warten auf dich. Tippe auf +, wenn du etwas ausgibst.`
-      : isPast ? "In diesem Monat wurde nichts eingetragen." : "Dieser Monat liegt noch in der Zukunft.";
+      : isPast ? "In diesem Monat wurde nichts eingetragen" : "Dieser Monat liegt noch in der Zukunft";
   }
 }
 
@@ -716,7 +716,7 @@ async function saveExpense() {
     if (photo.data) {
       receiptId = "r_" + uid();
       try { await idbPut(receiptId, photo.data); thumbCache.set(receiptId, photo.data); }
-      catch { toast("Foto konnte nicht gespeichert werden."); return; }
+      catch { toast("Foto konnte nicht gespeichert werden"); return; }
     }
   }
   const wasEdit = !!editing;
@@ -957,7 +957,7 @@ function formatColumn(ws, col, z) {
 }
 async function exportExcel() {
   if (!window.XLSX) return toast("Excel-Modul lädt noch …");
-  if (!expenses.length) return toast("Noch nichts zu exportieren.");
+  if (!expenses.length) return toast("Noch nichts zu exportieren");
   const sorted = [...expenses].sort((a, b) => byNewest(b, a));
   const rows = sorted.map((e) => ({
     Monat: monthLabel(expMonth(e)), Datum: excelDate(e.date), "Wofür": e.text, Kategorie: e.cat,
@@ -984,7 +984,7 @@ async function exportExcel() {
     const ok = await saveFile(`Monatskasse_${fileStem()}_${todayISO()}.xlsx`, XLSX.write(wb, { type: "base64", bookType: "xlsx" }),
       { base64: true, mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     if (ok) toast("Excel erstellt");
-  } catch (err) { console.error(err); toast("Export fehlgeschlagen."); }
+  } catch (err) { console.error(err); toast("Export fehlgeschlagen"); }
 }
 
 async function exportBackup() {
@@ -994,13 +994,13 @@ async function exportBackup() {
     const json = JSON.stringify({ app: "monatskasse", version: 1, exportedAt: new Date().toISOString(), settings, expenses, receipts });
     const ok = await saveFile(`Monatskasse_Backup_${fileStem()}_${todayISO()}.json`, json, { mime: "application/json" });
     if (ok) toast("Backup erstellt");
-  } catch (err) { console.error(err); toast("Backup fehlgeschlagen."); }
+  } catch (err) { console.error(err); toast("Backup fehlgeschlagen"); }
 }
 
 async function restoreBackup(file) {
   let data;
-  try { data = JSON.parse(await file.text()); } catch { return toast("Das ist keine gültige Backup-Datei."); }
-  if (data?.app !== "monatskasse" || !Array.isArray(data.expenses)) return toast("Das ist kein Monatskasse-Backup.");
+  try { data = JSON.parse(await file.text()); } catch { return toast("Das ist keine gültige Backup-Datei"); }
+  if (data?.app !== "monatskasse" || !Array.isArray(data.expenses)) return toast("Das ist kein Monatskasse-Backup");
   // Vertrauensgrenze: fremde Datei — alles prüfen, nur Bilder als data:-URL übernehmen
   const list = data.expenses.map(sanitizeExpense).filter(Boolean);
   const receipts = Object.entries(data.receipts && typeof data.receipts === "object" ? data.receipts : {})
@@ -1018,7 +1018,7 @@ async function restoreBackup(file) {
     viewMonth = currentMonth();
     render(); haptic("success");
     toast(`Backup geladen: ${list.length} Ausgaben`);
-  } catch (err) { console.error(err); toast("Laden fehlgeschlagen – deine bisherigen Daten sind unverändert."); }
+  } catch (err) { console.error(err); toast("Laden fehlgeschlagen, deine bisherigen Daten sind unverändert"); }
 }
 
 async function wipeAll() {
@@ -1058,7 +1058,7 @@ function wire() {
     ev.target.value = "";
     if (!f) return;
     const d = await downscale(f);
-    if (!d) return toast("Foto konnte nicht geladen werden.");
+    if (!d) return toast("Foto konnte nicht geladen werden");
     photo = { data: d, changed: true };
     renderPhoto();
   };
